@@ -1,0 +1,198 @@
+import pytest
+from httpx import AsyncClient
+
+from tests.conftest import auth_headers, register_and_login
+
+
+class TestShortenURL:
+    async def test_shorten_anonymous(self, client: AsyncClient):
+        """Anonymous users can shorten URLs."""
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "short_code" in data
+        assert "short_url" in data
+        assert data["click_count"] == 0
+        assert data["is_active"] is True
+
+    async def test_shorten_authenticated(self, client: AsyncClient):
+        token = await register_and_login(client)
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://github.com"},
+            headers=auth_headers(token),
+        )
+        assert resp.status_code == 201
+        assert resp.json()["short_code"] is not None
+
+    async def test_shorten_with_expiry(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={
+                "original_url": "https://example.com",
+                "expires_at": "2099-12-31T00:00:00Z",
+            },
+        )
+        assert resp.status_code == 201
+        assert resp.json()["expires_at"] is not None
+
+    async def test_shorten_with_max_clicks(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com", "max_clicks": 5},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["max_clicks"] == 5
+
+    async def test_shorten_invalid_url(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "not-a-url"},
+        )
+        assert resp.status_code == 422
+
+    async def test_shorten_max_clicks_zero_rejected(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com", "max_clicks": 0},
+        )
+        assert resp.status_code == 422
+
+    async def test_short_code_is_base62(self, client: AsyncClient):
+        """Short code must only contain Base62 characters."""
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+        )
+        code = resp.json()["short_code"]
+        valid = set("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        assert all(c in valid for c in code)
+
+    async def test_each_url_gets_unique_short_code(self, client: AsyncClient):
+        r1 = await client.post(
+            "/api/v1/urls/shorten", json={"original_url": "https://example.com"}
+        )
+        r2 = await client.post(
+            "/api/v1/urls/shorten", json={"original_url": "https://google.com"}
+        )
+        assert r1.json()["short_code"] != r2.json()["short_code"]
+
+
+class TestListURLs:
+    async def test_list_requires_auth(self, client: AsyncClient):
+        resp = await client.get("/api/v1/urls/")
+        assert resp.status_code == 401
+
+    async def test_list_returns_only_own_urls(self, client: AsyncClient):
+        token = await register_and_login(client)
+        # Create 2 URLs as authenticated user
+        for url in ["https://example.com", "https://github.com"]:
+            await client.post(
+                "/api/v1/urls/shorten",
+                json={"original_url": url},
+                headers=auth_headers(token),
+            )
+        resp = await client.get("/api/v1/urls/", headers=auth_headers(token))
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["items"]) == 2
+        assert "has_more" in data
+
+    async def test_list_pagination(self, client: AsyncClient):
+        token = await register_and_login(client)
+        for i in range(5):
+            await client.post(
+                "/api/v1/urls/shorten",
+                json={"original_url": f"https://example{i}.com"},
+                headers=auth_headers(token),
+            )
+        resp = await client.get(
+            "/api/v1/urls/?skip=0&limit=2", headers=auth_headers(token)
+        )
+        data = resp.json()
+        assert len(data["items"]) == 2
+        assert data["has_more"] is True
+
+    async def test_list_empty_for_new_user(self, client: AsyncClient):
+        token = await register_and_login(client)
+        resp = await client.get("/api/v1/urls/", headers=auth_headers(token))
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
+class TestDeleteURL:
+    async def test_delete_own_url(self, client: AsyncClient):
+        token = await register_and_login(client)
+        create = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+            headers=auth_headers(token),
+        )
+        url_id = create.json()["id"]
+        resp = await client.delete(
+            f"/api/v1/urls/{url_id}", headers=auth_headers(token)
+        )
+        assert resp.status_code == 204
+
+    async def test_delete_nonexistent_url(self, client: AsyncClient):
+        token = await register_and_login(client)
+        resp = await client.delete("/api/v1/urls/99999", headers=auth_headers(token))
+        assert resp.status_code == 404
+
+    async def test_delete_requires_auth(self, client: AsyncClient):
+        resp = await client.delete("/api/v1/urls/1")
+        assert resp.status_code == 401
+
+
+class TestAnalytics:
+    async def test_analytics_requires_auth(self, client: AsyncClient):
+        resp = await client.get("/api/v1/urls/1/analytics")
+        assert resp.status_code == 401
+
+    async def test_analytics_returns_correct_structure(self, client: AsyncClient):
+        token = await register_and_login(client)
+        create = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+            headers=auth_headers(token),
+        )
+        url_id = create.json()["id"]
+        resp = await client.get(
+            f"/api/v1/urls/{url_id}/analytics", headers=auth_headers(token)
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_clicks"] == 0
+        assert data["short_code"] is not None
+        assert "recent_clicks" in data
+        assert "top_countries" in data
+
+    async def test_analytics_wrong_owner_returns_404(self, client: AsyncClient):
+        # Create URL as user 1
+        token1 = await register_and_login(client)
+        create = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+            headers=auth_headers(token1),
+        )
+        url_id = create.json()["id"]
+
+        # Register user 2 and try to access user 1's analytics
+        await client.post(
+            "/api/v1/auth/register",
+            json={"email": "user2@example.com", "password": "Testpass1"},
+        )
+        resp2 = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "user2@example.com", "password": "Testpass1"},
+        )
+        token2 = resp2.json()["access_token"]
+
+        resp = await client.get(
+            f"/api/v1/urls/{url_id}/analytics", headers=auth_headers(token2)
+        )
+        assert resp.status_code == 404
