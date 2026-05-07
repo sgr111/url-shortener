@@ -25,28 +25,28 @@ Converts long URLs to short Base62-encoded codes with expiry, click analytics, J
 | **Test Coverage** | 51 tests — 100% pass rate |
 | **Test Runtime** | ~24 seconds |
 | **Auth** | JWT access tokens (30 min expiry) |
-| **Rate Limiting** | Per-IP via slowapi |
+| **Rate Limiting** | Per-user (authenticated) / Per-IP (anonymous) via slowapi |
 
 ---
 
-## ✨ Features
+##  Features
 
-- 🔗 **URL Shortening** — Base62-encoded short codes, guaranteed unique, no collisions
-- ↩️ **Instant Redirect** — HTTP 302 with indexed lookup
-- ⏳ **Expiry by Date** — set `expires_at`, link returns 410 Gone after that
-- 🖱️ **Expiry by Clicks** — set `max_clicks`, link dies after N clicks
-- 📊 **Click Analytics** — total clicks, recent clicks, top countries per URL
-- 🔐 **JWT Authentication** — register, login, protected endpoints
-- 👤 **Anonymous Shortening** — no account needed for basic shortening
-- 🗑️ **Soft Delete** — `is_active=False`, data + analytics preserved
-- 📄 **Pagination** — `skip/limit` with `has_more` field, silent MAX_PAGE_SIZE clamping
-- 🚦 **Rate Limiting** — per-IP limits via slowapi
-- ✅ **Password Validation** — requires uppercase + digit
-- 🏥 **Health Check** — `/health` endpoint for deployment monitoring
+-  **URL Shortening** — Base62-encoded short codes, guaranteed unique, no collisions
+-  **Instant Redirect** — HTTP 302 with indexed lookup
+-  **Expiry by Date** — set `expires_at`, link returns 410 Gone after that
+-  **Expiry by Clicks** — set `max_clicks`, link dies after N clicks
+-  **Click Analytics** — total clicks, recent clicks, top countries per URL
+-  **JWT Authentication** — register, login, protected endpoints
+-  **Anonymous Shortening** — no account needed for basic shortening
+-  **Soft Delete** — `is_active=False`, data + analytics preserved
+-  **Pagination** — `skip/limit` with `has_more` field, silent MAX_PAGE_SIZE clamping
+-  **Rate Limiting** — Per-user (authenticated) / Per-IP (anonymous) via slowapi
+-  **Password Validation** — requires uppercase + digit
+-  **Health Check** — `/health` endpoint for deployment monitoring
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Layer | Technology | Why |
 |-------|-----------|-----|
@@ -56,7 +56,7 @@ Converts long URLs to short Base62-encoded codes with expiry, click analytics, J
 | Migrations | Alembic | Version-controlled schema changes |
 | Auth | python-jose (JWT) + passlib (bcrypt) | Stateless auth, secure password hashing |
 | Validation | Pydantic v2 | Runtime type checking, field validators |
-| Rate Limiting | slowapi | Per-IP request throttling |
+| Rate Limiting | slowapi | Per-user (authenticated) / Per-IP (anonymous) throttling |
 | HTTP Client | httpx | Async test client |
 | Testing | pytest + pytest-asyncio | 51 tests, SQLite in-memory |
 
