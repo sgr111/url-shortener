@@ -3,7 +3,8 @@ Test configuration — mirrors your v4 pattern exactly.
 
 Key decisions:
   - SQLite (aiosqlite) for tests — no PostgreSQL needed locally
-  - Limiter disabled via mock.patch — tests focus on logic not rate limits
+  - Limiter storage reset before every test — real limits stay active,
+    but one test's quota usage never bleeds into the next test
   - Function-scoped DB — each test gets a clean slate
   - AsyncClient (httpx) — same as v4
 """
@@ -13,6 +14,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.core.limiter import limiter
 from app.db.session import Base, get_db
 from app.main import app
 
@@ -28,6 +30,12 @@ TestSessionLocal = async_sessionmaker(
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def setup_db():
+    # Reset the rate limiter's in-memory storage before every test so that
+    # quota used up by one test (e.g. register/login called in a helper)
+    # never bleeds into the next test. Without this, real @limiter.limit(...)
+    # decorators on endpoints will cause unrelated tests to fail with 429s
+    # once the whole suite's request count crosses the per-minute threshold.
+    limiter.reset()
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

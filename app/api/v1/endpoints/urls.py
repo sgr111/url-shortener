@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.dependencies import get_current_user, get_optional_user
+from app.core.limiter import limiter
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.analytics import AnalyticsOut
@@ -12,6 +13,7 @@ router = APIRouter(prefix="/urls", tags=["URLs"])
 
 
 @router.post("/shorten", response_model=URLOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("10/minute")
 async def shorten_url(
     request: Request,
     body: URLCreate,
