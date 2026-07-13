@@ -147,6 +147,37 @@ class TestDeleteURL:
         resp = await client.delete("/api/v1/urls/1")
         assert resp.status_code == 401
 
+    async def test_delete_wrong_owner_returns_404(self, client: AsyncClient):
+        """IDOR check: User B cannot delete User A's URL using its ID."""
+        token_a = await register_and_login(client)
+        create = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+            headers=auth_headers(token_a),
+        )
+        url_id = create.json()["id"]
+
+        await client.post(
+            "/api/v1/auth/register",
+            json={"email": "idor_user_b@example.com", "password": "Testpass1"},
+        )
+        login_b = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "idor_user_b@example.com", "password": "Testpass1"},
+        )
+        token_b = login_b.json()["access_token"]
+
+        resp = await client.delete(
+            f"/api/v1/urls/{url_id}", headers=auth_headers(token_b)
+        )
+        assert resp.status_code == 404
+
+        # Confirm the URL was NOT actually deleted by the wrong owner
+        still_there = await client.get(
+            "/api/v1/urls/", headers=auth_headers(token_a)
+        )
+        assert still_there.json()["total"] == 1
+
 
 class TestAnalytics:
     async def test_analytics_requires_auth(self, client: AsyncClient):

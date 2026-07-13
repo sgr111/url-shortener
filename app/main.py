@@ -7,6 +7,7 @@ from slowapi.errors import RateLimitExceeded
 from app.api.v1.endpoints.redirect import router as redirect_router
 from app.api.v1.router import router as api_router
 from app.core.limiter import limiter
+from app.core.scheduler import start_scheduler, stop_scheduler
 from app.db.session import Base, engine
 
 
@@ -15,7 +16,9 @@ async def lifespan(app: FastAPI):
     # Create tables on startup (Alembic handles this in production)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    start_scheduler()
     yield
+    stop_scheduler()
 
 
 app = FastAPI(

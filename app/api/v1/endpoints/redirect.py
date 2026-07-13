@@ -63,4 +63,17 @@ async def redirect_to_original(
         country=None,  # Future: fetch from ip-api.com via httpx
     )
 
+    # If the owner set a webhook_url, enqueue a retry-safe delivery job
+    # instead of firing the webhook directly — a plain BackgroundTask would
+    # lose the notification if the target endpoint is down or times out.
+    if url.webhook_url:
+        background_tasks.add_task(
+            url_service.enqueue_webhook_job,
+            db,
+            url.id,
+            url.webhook_url,
+            ip,
+            user_agent,
+        )
+
     return RedirectResponse(url=str(url.original_url), status_code=status.HTTP_302_FOUND)

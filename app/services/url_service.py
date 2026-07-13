@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.base62 import encode
 from app.core.config import settings
-from app.models.url import URL, ClickEvent
+from app.models.url import URL, ClickEvent, WebhookQueue
 from app.schemas.analytics import AnalyticsOut, ClickEventOut, CountryCount
 from app.schemas.url import URLCreate, URLListOut, URLOut
 
@@ -36,6 +36,7 @@ def _to_url_out(url: URL) -> URLOut:
         is_active=url.is_active,
         expires_at=url.expires_at,
         max_clicks=url.max_clicks,
+        webhook_url=url.webhook_url,
         created_at=url.created_at,
     )
 
@@ -55,6 +56,7 @@ async def create_short_url(
         user_id=user_id,
         expires_at=data.expires_at,
         max_clicks=data.max_clicks,
+        webhook_url=str(data.webhook_url) if data.webhook_url else None,
     )
     db.add(url)
     await db.flush()  # Gets url.id without committing
@@ -122,6 +124,36 @@ async def log_click_event(
         country=country,
     )
     db.add(event)
+    await db.commit()
+
+
+async def enqueue_webhook_job(
+    db: AsyncSession,
+    url_id: int,
+    webhook_url: str,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> None:
+    """
+    Insert a pending WebhookQueue row for this click.
+
+    Delivery itself happens in the APScheduler processor (core/scheduler.py),
+    not here — this function only records intent to notify. This is what
+    makes webhook-on-click retry-safe: if delivery fails, the row stays
+    'pending'/gets rescheduled instead of the event being lost like it
+    would be with a plain fire-and-forget BackgroundTask.
+    """
+    job = WebhookQueue(
+        url_id=url_id,
+        webhook_url=webhook_url,
+        payload={
+            "url_id": url_id,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "clicked_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    db.add(job)
     await db.commit()
 
 

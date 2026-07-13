@@ -94,3 +94,33 @@ class TestHealth:
         resp = await client.get("/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+
+class TestWebhookQueue:
+    async def test_click_with_webhook_url_enqueues_job(self, client: AsyncClient, db_session):
+        from sqlalchemy import select
+        from app.models.url import WebhookQueue
+
+        data = await create_url(
+            client,
+            "https://example.com",
+            webhook_url="https://webhook.site/fake-endpoint",
+        )
+        await client.get(f"/{data['short_code']}", follow_redirects=False)
+
+        result = await db_session.execute(select(WebhookQueue))
+        jobs = result.scalars().all()
+        assert len(jobs) == 1
+        assert jobs[0].status == "pending"
+        assert jobs[0].webhook_url == "https://webhook.site/fake-endpoint"
+        assert jobs[0].payload["url_id"] == data["id"]
+
+    async def test_click_without_webhook_url_enqueues_nothing(self, client: AsyncClient, db_session):
+        from sqlalchemy import select
+        from app.models.url import WebhookQueue
+
+        data = await create_url(client, "https://example.com")
+        await client.get(f"/{data['short_code']}", follow_redirects=False)
+
+        result = await db_session.execute(select(WebhookQueue))
+        assert len(result.scalars().all()) == 0

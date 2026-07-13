@@ -7,6 +7,7 @@ class URLCreate(BaseModel):
     original_url: HttpUrl
     expires_at: datetime | None = None
     max_clicks: int | None = None
+    webhook_url: HttpUrl | None = None  # optional — notified via retry-queue on each click
 
     @field_validator("max_clicks")
     @classmethod
@@ -25,6 +26,7 @@ class URLOut(BaseModel):
     is_active: bool
     expires_at: datetime | None
     max_clicks: int | None
+    webhook_url: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
