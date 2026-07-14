@@ -29,6 +29,7 @@ async def redirect_to_original(
     request: Request,
     short_code: str,
     background_tasks: BackgroundTasks,
+    password: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     url = await url_service.get_url_by_code(db, short_code)
@@ -46,8 +47,16 @@ async def redirect_to_original(
             detail=reason,
         )
 
+    # Password-protected links: checked before counting the click or
+    # firing webhooks, so a wrong/missing password never triggers either.
+    if not url_service.check_password(url, password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Password required or incorrect. Pass it as ?password=...",
+        )
+
     # Atomic increment — avoids race condition under concurrent traffic
-    await url_service.increment_click_count(db, url.id)
+    await url_service.increment_click_count(db, url, short_code=short_code)
 
     # Log click event AFTER redirect response is sent
     # Uses a new session inside the background task

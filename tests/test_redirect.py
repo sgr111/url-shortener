@@ -89,6 +89,38 @@ class TestRedirect:
         assert resp.status_code == 410
 
 
+class TestPasswordProtectedLinks:
+    async def test_password_protected_redirect_without_password_returns_401(self, client: AsyncClient):
+        data = await create_url(client, "https://example.com", password="secret1")
+        resp = await client.get(f"/{data['short_code']}", follow_redirects=False)
+        assert resp.status_code == 401
+
+    async def test_password_protected_redirect_wrong_password_returns_401(self, client: AsyncClient):
+        data = await create_url(client, "https://example.com", password="secret1")
+        resp = await client.get(
+            f"/{data['short_code']}?password=wrong", follow_redirects=False
+        )
+        assert resp.status_code == 401
+
+    async def test_password_protected_redirect_correct_password_works(self, client: AsyncClient):
+        data = await create_url(client, "https://example.com", password="secret1")
+        resp = await client.get(
+            f"/{data['short_code']}?password=secret1", follow_redirects=False
+        )
+        assert resp.status_code == 302
+
+    async def test_unprotected_redirect_ignores_password_param(self, client: AsyncClient):
+        data = await create_url(client, "https://example.com")
+        resp = await client.get(f"/{data['short_code']}", follow_redirects=False)
+        assert resp.status_code == 302
+
+    async def test_shorten_reports_is_password_protected(self, client: AsyncClient):
+        protected = await create_url(client, "https://example.com", password="secret1")
+        unprotected = await create_url(client, "https://example.com")
+        assert protected["is_password_protected"] is True
+        assert unprotected["is_password_protected"] is False
+
+
 class TestHealth:
     async def test_health_check(self, client: AsyncClient):
         resp = await client.get("/health")

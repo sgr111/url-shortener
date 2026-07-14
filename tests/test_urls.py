@@ -80,6 +80,120 @@ class TestShortenURL:
         )
         assert r1.json()["short_code"] != r2.json()["short_code"]
 
+    async def test_shorten_password_too_short_rejected(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com", "password": "abc"},
+        )
+        assert resp.status_code == 422
+
+    async def test_shorten_with_password_accepted(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com", "password": "secret1"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["is_password_protected"] is True
+        # Raw password must never be echoed back
+        assert "password" not in resp.json()
+
+
+class TestQRCode:
+    async def test_qr_code_returns_png(self, client: AsyncClient):
+        create = await client.post(
+            "/api/v1/urls/shorten", json={"original_url": "https://example.com"}
+        )
+        short_code = create.json()["short_code"]
+
+        resp = await client.get(f"/api/v1/urls/{short_code}/qr")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/png"
+        assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"  # PNG file signature
+
+    async def test_qr_code_nonexistent_short_code_returns_404(self, client: AsyncClient):
+        resp = await client.get("/api/v1/urls/doesnotexist/qr")
+        assert resp.status_code == 404
+
+    async def test_qr_code_deleted_url_returns_410(self, client: AsyncClient):
+        token = await register_and_login(client)
+        create = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com"},
+            headers=auth_headers(token),
+        )
+        url_id = create.json()["id"]
+        short_code = create.json()["short_code"]
+        await client.delete(f"/api/v1/urls/{url_id}", headers=auth_headers(token))
+
+        resp = await client.get(f"/api/v1/urls/{short_code}/qr")
+        assert resp.status_code == 410
+
+    async def test_qr_code_works_for_password_protected_link(self, client: AsyncClient):
+        """QR generation doesn't require the password — it only encodes the
+        short URL. The redirect endpoint itself still enforces the password
+        when someone scans it."""
+        create = await client.post(
+            "/api/v1/urls/shorten",
+            json={"original_url": "https://example.com", "password": "secret1"},
+        )
+        short_code = create.json()["short_code"]
+
+        resp = await client.get(f"/api/v1/urls/{short_code}/qr")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/png"
+
+
+class TestBulkUpload:
+    async def test_bulk_shorten_valid_csv(self, client: AsyncClient):
+        csv_content = (
+            "original_url\n"
+            "https://example.com\n"
+            "https://github.com\n"
+            "https://google.com\n"
+        )
+        resp = await client.post(
+            "/api/v1/urls/bulk-shorten",
+            files={"file": ("urls.csv", csv_content, "text/csv")},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["total"] == 3
+        assert data["succeeded"] == 3
+        assert data["failed"] == 0
+        assert all(r["success"] for r in data["results"])
+
+    async def test_bulk_shorten_reports_bad_rows(self, client: AsyncClient):
+        csv_content = (
+            "original_url\n"
+            "https://example.com\n"
+            "not-a-valid-url\n"
+            " \n"
+        )
+        resp = await client.post(
+            "/api/v1/urls/bulk-shorten",
+            files={"file": ("urls.csv", csv_content, "text/csv")},
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["total"] == 3
+        assert data["succeeded"] == 1
+        assert data["failed"] == 2
+
+    async def test_bulk_shorten_rejects_non_csv(self, client: AsyncClient):
+        resp = await client.post(
+            "/api/v1/urls/bulk-shorten",
+            files={"file": ("urls.txt", "original_url\nhttps://example.com\n", "text/plain")},
+        )
+        assert resp.status_code == 400
+
+    async def test_bulk_shorten_rejects_missing_column(self, client: AsyncClient):
+        csv_content = "url\nhttps://example.com\n"
+        resp = await client.post(
+            "/api/v1/urls/bulk-shorten",
+            files={"file": ("urls.csv", csv_content, "text/csv")},
+        )
+        assert resp.status_code == 400
+
 
 class TestListURLs:
     async def test_list_requires_auth(self, client: AsyncClient):

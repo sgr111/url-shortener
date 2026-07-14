@@ -47,6 +47,9 @@ class URL(Base):
     # Optional user-provided webhook — notified via WebhookQueue (retry-safe), not BackgroundTasks
     webhook_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Optional password protection — bcrypt hash, never the raw password
+    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     owner: Mapped["User | None"] = relationship("User", back_populates="urls")  # noqa: F821
     click_events: Mapped[list["ClickEvent"]] = relationship(
         "ClickEvent", back_populates="url", cascade="all, delete-orphan"
